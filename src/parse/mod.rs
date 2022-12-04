@@ -1,13 +1,18 @@
-use pom::char_class::{hex_digit,alpha, alphanum, digit};
-use pom::parser::{call, end, is_a, list, none_of, seq, sym, Parser};
+use pom::char_class::{digit};
+use pom::parser::{call, end, is_a, list, seq, sym, Parser};
 
 use std::str::{self, FromStr};
 
 mod json;
 mod utils;
 mod jump;
+mod identifier;
+mod label;
+use self::label::label;
+use self::jump::jump;
 use self::json::{JsonValue, value};
 use self::utils::space;
+use self::identifier::valid_id;
 
 #[derive(Debug, PartialEq)]
 pub enum MastCmd {
@@ -35,15 +40,6 @@ pub enum MastCmd {
     Log(Option<String>,String,Option<String>)
 }
 
-#[inline]
-pub fn var_start(term: u8) -> bool {
-	alpha(term) || term == b'_'
-}
-#[inline]
-pub fn var_rest(term: u8) -> bool {
-	alphanum(term) || term == b'_'
-}
-
 
 
 
@@ -52,15 +48,7 @@ fn comment<'a>() -> Parser<'a, u8, ()> {
 }
 
 
-fn valid_id<'a>() -> Parser<'a, u8, String> {
-    (is_a(var_start) + is_a(var_rest).repeat(0..))
-        .map(|(first, rest)| format!("{}{}", first as char, String::from_utf8(rest).unwrap()))
-}
 
-fn label<'a>() -> Parser<'a, u8, MastCmd> {
-    let valid_id = valid_id();
-    sym(b'=').repeat(2..) * space() * valid_id.map(|s| MastCmd::Label(s)) - space() - sym(b'=').repeat(2..)
-}
 
 
 fn parallel<'a>() -> Parser<'a, u8, MastCmd> {
@@ -152,7 +140,7 @@ fn mast_command<'a>() -> Parser<'a, u8, MastCmd> {
     space().opt() *
 	(variable_def().map(|cmd| cmd)
 		| label().map(|cmd| cmd)
-        | jump::jump().map(|cmd| cmd)
+        | jump().map(|cmd| cmd)
         | await_parallel().map(|cmd| cmd)
         | await_name().map(|cmd| cmd)
         | cancel_name().map(|cmd| cmd)
