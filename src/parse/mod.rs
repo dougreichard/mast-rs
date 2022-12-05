@@ -1,18 +1,26 @@
 use pom::char_class::{digit};
 use pom::parser::{call, end, is_a, list, seq, sym, Parser};
 
+use std::collections::HashMap;
 use std::str::{self, FromStr};
 
 mod json;
+use self::json::{JsonValue, value};
 mod utils;
+use self::utils::space;
 mod jump;
+use self::jump::jump;
 mod identifier;
+use self::identifier::valid_id;
 mod label;
 use self::label::label;
-use self::jump::jump;
-use self::json::{JsonValue, value};
-use self::utils::space;
-use self::identifier::valid_id;
+mod if_command;
+use self::if_command::{if_command, elif_command, else_command, end_if_command};
+mod match_command;
+use self::match_command::{match_command, case_command, default_case_command, end_match_command};
+mod for_command;
+use self::for_command::{for_command, break_command, continue_command, end_for_command};
+
 
 #[derive(Debug, PartialEq)]
 pub enum MastCmd {
@@ -23,7 +31,20 @@ pub enum MastCmd {
     End(),
     PopPush(String),
     PopJump(String),
-    Label(String),
+    If(String),
+    ElIf(String),
+    Else(),
+    EndIf(),
+
+    Match(String),
+    Case(JsonValue),
+    DefaultCase(),
+    EndMatch(),
+    For(String, String),
+    Break(),
+    Continue(),
+    Next(String),
+    //Label(String, Vec<MastCmd>),
 
     Parallel(Option<String>,String, Option<JsonValue>),
     CancelName(String),
@@ -139,17 +160,65 @@ fn variable_def<'a>() -> Parser<'a, u8, MastCmd> {
 fn mast_command<'a>() -> Parser<'a, u8, MastCmd> {
     space().opt() *
 	(variable_def().map(|cmd| cmd)
-		| label().map(|cmd| cmd)
         | jump().map(|cmd| cmd)
         | await_parallel().map(|cmd| cmd)
         | await_name().map(|cmd| cmd)
         | cancel_name().map(|cmd| cmd)
         | parallel().map(|cmd| cmd)
         | delay().map(|cmd| cmd)
+        | if_command().map(|cmd| cmd)
+        | elif_command().map(|cmd| cmd)
+        | else_command().map(|cmd| cmd)
+        | end_if_command().map(|cmd| cmd)
+        | match_command().map(|cmd| cmd)
+        | default_case_command().map(|cmd| cmd)
+        | case_command().map(|cmd| cmd)
+        | end_match_command().map(|cmd| cmd)
+        | for_command().map(|cmd| cmd)
+        | break_command().map(|cmd| cmd)
+        | continue_command().map(|cmd| cmd)
+        | end_for_command().map(|cmd| cmd)
   ) - comment().opt()
 }
 
-pub fn mast_commands<'a>() -> Parser<'a, u8, Vec<MastCmd>> {
-	let elems = list(call(mast_command), space());
-	elems - end()
+// pub fn mast_commands<'a>() -> Parser<'a, u8, Vec<MastCmd>> {
+// 	let elems = list(call(mast_command), space());
+// 	elems - end()
+// }
+
+pub struct Label {
+    label : String,
+    cmds : Vec<MastCmd>
 }
+
+pub fn label_block<'a>() -> Parser<'a, u8, Label> {
+    let label = space().opt() * label();
+    let elems = list(call(mast_command), space());
+    (label + elems).map(|s| Label{label: s.0, cmds: s.1})
+}
+pub fn main_label_block<'a>() -> Parser<'a, u8, Label> {
+    let elems = list(call(mast_command), space());
+    (elems).map(|s| Label{label: String::from("main"), cmds:s})
+}
+#[derive(Debug)]
+pub struct MastDoc {
+    labels : HashMap<String, Vec<MastCmd>>
+}
+
+fn to_mast_doc<'a>(main: Label, label_blocks: Vec<Label>) -> MastDoc {
+    let mut labels :HashMap<String, Vec<MastCmd>> = label_blocks
+        .into_iter()
+        .map(|label| (label.label, label.cmds)).collect();
+    labels.insert(main.label, main.cmds);
+
+    MastDoc {
+        labels
+    }
+}
+
+pub fn mast_doc<'a>() -> Parser<'a, u8, MastDoc> {
+    let main = space().opt() * main_label_block();
+    let labels = list(call(label_block), space());
+    (main + labels).map(|s| to_mast_doc(s.0,s.1))
+}
+
